@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+</head>
+<script>
+  function findindex(x) {
+    let i = 0
+    let max_num = x[0];
+    let max_index=0;
+    for(const i of x){
+        if(x[i]>max_num){
+            max_num = x[i];
+            max_index= i;
+        }
+
+    }
+    return max_index;
+  }
+</script>
+<script>
+  const mylist = ['_', 'can', 'help', 'ma', 'eat','ramen', 'recent'];
+  const actions = mylist;
+  let sequence = [];
+  let predictions = [];
+  const threshold = 0.999;
+
+  async function loadModel() {
+      const model = await tf.loadLayersModel("./handsmodel/model.json");
+      return model;
+  }
+
+  function extractKeyPoints(results) {
+    // 檢查 results.rightHandLandmarks 是否被定義
+    let rightHand=[];
+    let leftHand =[];
+    if (results.rightHandLandmarks) {
+        
+        for (const landmark of results.rightHandLandmarks) {
+    if (landmark) {
+      //  console.log(landmark.x, landmark.y, landmark.z);
+        rightHand.push(landmark.x, landmark.y, landmark.z);
+
+    } else {
+        rightHand.push(0, 0, 0);
+    }
+}
+       // console.log('Right Hand:', rightHand);
+    }else{
+        rightHand=Array(21 * 3).fill(0);
+    }
+    if (results.leftHandLandmarks) {
+        
+        for (const landmark of results.leftHandLandmarks) {
+    if (landmark) {
+      //  console.log(landmark.x, landmark.y, landmark.z);
+        leftHand.push(landmark.x, landmark.y, landmark.z);
+
+    } else {
+        leftHand.push(0, 0, 0);
+    }
+}
+       // console.log('left Hand:', leftHand);
+    }else{
+        leftHand =Array(21 * 3).fill(0);
+    }
+    concatenatedArray = leftHand.concat(rightHand);
+ //  console.log('Hand:', concatenatedArray);
+    return concatenatedArray;
+}
+
+</script>
+<body>
+    <div class="container">
+        <video class="input_video"></video>
+        
+        <canvas class="output_canvas" width="1280px" height="720px"></canvas>
+    </div>
+
+    <script type="module">
+        const videoElement = document.getElementsByClassName('input_video')[0];
+        const canvasElement = document.getElementsByClassName('output_canvas')[0];
+        const canvasCtx = canvasElement.getContext('2d');
+
+        async function onResults(results) {
+    const model = await loadModel();
+        let keypoints = extractKeyPoints(results);
+        sequence.push(keypoints);
+        sequence = sequence.slice(-70);
+        //console.log('s:', sequence);
+        if (sequence.length === 70) {
+            const sequenceTensor = tf.tensor2d(sequence, [70, 126]);
+            const expandedSequence = sequenceTensor.expandDims(0);
+            const prediction = model.predict(expandedSequence);
+            let res = findindex(prediction.dataSync());
+            const predictedAction = actions[prediction.argMax().dataSync()[0]];
+            const predictionArray = prediction.dataSync();
+            const maxValue = Math.max(...predictionArray);
+            const maxIndex = predictionArray.indexOf(maxValue);
+            console.log(mylist[maxIndex]);
+            // const maxIndex = tf.argMax(predictionArray);
+            // const maxValue = predictionArray[maxIndex];
+            // console.log(`Max Index: ${maxIndex}, Max Value: ${maxValue}`);
+
+            //console.log("pred=",prediction.dataSync());
+       //     console.log( res);
+            predictions.push(prediction.argMax().dataSync()[0]);
+        }
+}
+        const holistic = new Holistic({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`
+        });
+        holistic.setOptions({
+            modelComplexity: 0,
+            smoothLandmarks: true,
+            enableSegmentation: true,
+            smoothSegmentation: true,
+            refineFaceLandmarks: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        holistic.onResults(onResults);
+        
+        const camera = new Camera(videoElement, {
+            onFrame: async () => await holistic.send({ image: videoElement }),
+            width: 1280,
+            height: 720
+        });
+        camera.start();
+    </script>
+</body>
+</html>
